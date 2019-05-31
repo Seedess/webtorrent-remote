@@ -1,0 +1,3 @@
+[submodule "modules/webtorrent-remote"]
+	path = modules/webtorrent-remote
+	url = git@github.com:Seedess/webtorrent-remote.git

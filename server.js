@@ -28,7 +28,7 @@ function WebTorrentRemoteServer (send, opts) {
 
   var updateInterval = opts.updateInterval != null
     ? opts.updateInterval
-    : 1000
+    : 10000
 
   if (updateInterval) {
     setInterval(sendUpdates.bind(null, this), updateInterval)
@@ -57,8 +57,12 @@ WebTorrentRemoteServer.prototype.receive = function (message) {
       return handleHeartbeat(this, message)
     case 'destroy':
       return handleDestroy(this, message)
+    case 'file-stream':
+      return handleFileCreateReadStream(this, message)
+      case 'add-webseed':
+        return handleAddWebseed(this, message)
     default:
-      console.error('ignoring unknown message type: ' + JSON.stringify(message))
+      console.error('ignoring unknown message type: ', message)
   }
 }
 
@@ -208,6 +212,54 @@ function handleCreateServer (server, message) {
   }
 }
 
+function handleAddWebseed(server, message) {
+  var { torrentKey, url } = message
+  var torrent = getTorrentByKey(server, torrentKey)
+  if (!torrent) return
+  torrent.addWebSeed(url)
+  debug('handled add webseed', { torrent, url })
+}
+
+function getFileByKey(torrent, fileKey) {
+  return torrent.files.find(file => file.path === fileKey)
+}
+
+function handleFileCreateReadStream (server, message) {
+  var clientKey = message.clientKey
+  var torrentKey = message.torrentKey
+  var fileKey = message.fileKey
+  var opts = message.opts
+  var torrent = getTorrentByKey(server, torrentKey)
+  var file = getFileByKey(torrent, fileKey)
+  var streamKey = message.streamKey
+  if (!torrent || !file) return
+
+  if (!file.readStreams) file.readStreams = {}
+  var stream = file.readStreams[streamKey] = file.createReadStream(opts)
+  debug('Handled file create read stream', file, stream)
+  stream.on('data', data => {
+    debug('stream data', data)
+    send(server, {
+      clientKey: clientKey,
+      torrentKey: torrentKey,
+      fileKey,
+      type: 'file-stream-data',
+      streamKey,
+      data
+    })
+  })
+  stream.on('end', () => {
+    send(server, {
+      clientKey: clientKey,
+      torrentKey: torrentKey,
+      fileKey,
+      type: 'file-stream-end',
+      streamKey
+    })
+  })
+  stream.resume()
+}
+
 function handleHeartbeat (server, message) {
   var client = server._clients[message.clientKey]
   if (!client) return console.error('skipping heartbeat for unknown clientKey ' + message.clientKey)
@@ -242,7 +294,9 @@ function getInfoMessage (server, torrent, type) {
       files: (torrent.files || []).map(function (file) {
         return {
           name: file.name,
-          length: file.length
+          length: file.length,
+          path: file.path,
+          offset: file.offset
         }
       })
     }

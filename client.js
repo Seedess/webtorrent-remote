@@ -1,6 +1,8 @@
 module.exports = WebTorrentRemoteClient
 
 var EventEmitter = require('events')
+var RemoteFile = require('./file')
+var debug = console.log.bind(console, 'webtorrent-remote:client ')
 
 /**
 * Provides the WebTorrent API.
@@ -73,6 +75,10 @@ WebTorrentRemoteClient.prototype.receive = function (message) {
       return handleServerReady(this, message)
     case 'torrent-subscribed':
       return handleSubscribed(this, message)
+    case 'file-stream-data':
+        return handleFileStreamData(this, message)
+    case 'file-stream-end':
+      return handleFileStreamEnd(this, message)
     default:
       console.error('ignoring message, unknown type: ' + JSON.stringify(message))
   }
@@ -160,12 +166,41 @@ function RemoteTorrent (client, key) {
 RemoteTorrent.prototype = Object.create(EventEmitter.prototype)
 
 /*
+ * Updates the torrent with info from server
+ * - info can contain { ...torrent, files, ...}
+ */
+RemoteTorrent.prototype.updateInfo = function (info) {
+  if (!this.updates) this.updates = []
+  this.updates.push({ info, fileLen: this.files && this.files.length })
+  const updates = (({ files, ...info }) => (info))(info)
+  Object.assign(this, updates)
+  debug('update info', info, updates)
+  if (info.files && info.files.length) {
+    this.files = info.files.map(file => new RemoteFile(this, file))
+
+    debug('update files', info.files, this.files)
+  }
+}
+
+/*
  * Creates a streaming torrent-to-HTTP server
  * - opts can contain {headers, ...}
  */
 RemoteTorrent.prototype.createServer = function (opts) {
   this.server = new RemoteTorrentServer(this, opts)
   return this.server
+}
+
+/*
+ * Adds a webseed URL
+ */
+RemoteTorrent.prototype.addWebSeed = function (url) {
+  this.client._send({
+    type: 'add-webseed',
+    clientKey: this.client.clientKey,
+    torrentKey: this.key,
+    url
+  })
 }
 
 function RemoteTorrentServer (torrent, opts) {
@@ -207,7 +242,7 @@ function sendHeartbeat (client) {
 
 function handleInfo (client, message) {
   var torrent = getTorrentByKey(client, message.torrentKey)
-  Object.assign(torrent, message.torrent)
+  torrent.updateInfo(message.torrent)
   torrent.emit(message.type)
 }
 
@@ -234,7 +269,7 @@ function handleSubscribed (client, message) {
   var torrent = getTorrentByKey(client, message.torrentKey)
   var cb = torrent._subscribedCallback
   if (message.torrent) {
-    Object.assign(torrent, message.torrent) // Fill in infohash, etc
+    torrent.updateInfo(message.torrent) // Fill in infohash, etc
     cb(null, torrent)
   } else {
     var err = new Error('Invalid torrent identifier')
@@ -244,10 +279,33 @@ function handleSubscribed (client, message) {
   }
 }
 
+function handleFileStreamData (client, message) {
+  var torrent = getTorrentByKey(client, message.torrentKey)
+  var file = getFileByKey(torrent, message.fileKey)
+  if (!file) throw new Error('File not found')
+
+  file.emit('stream-data', message)
+}
+
+function handleFileStreamEnd (client, message) {
+  var torrent = getTorrentByKey(client, message.torrentKey)
+  var file = getFileByKey(torrent, message.fileKey)
+  if (!file) throw new Error('File not found')
+
+  file.emit('stream-end', message)
+}
+
 function getTorrentByKey (client, torrentKey) {
   var torrent = client.torrents[torrentKey]
   if (torrent) return torrent
   throw new Error('Unrecognized torrentKey: ' + torrentKey)
+}
+
+function getFileByKey(torrent, fileKey) {
+  var file = torrent.files.find(file => file.key === fileKey)
+  if (file) return file
+  console.log('getFileByKey', torrent)
+  throw new Error('Unrecognized fileKey: ' + fileKey)
 }
 
 function generateUniqueKey () {
