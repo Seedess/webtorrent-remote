@@ -1,5 +1,5 @@
 const { EventEmitter } = require('events')
-const { createReadableStream } = require('../../src/lib/river')
+const { PassThrough, Writable } = require('stream')
 const debug = console.log.bind(console, 'webtorrent-remote:file ')
 
 class File extends EventEmitter {
@@ -66,14 +66,14 @@ class File extends EventEmitter {
             streamKey: this.streamKey,
             opts
           })
-          return createReadableStream(writer => {
-            this.on('stream-data', message => {
-                writer.write(message.data)
-            })
-            this.on('stream-end', () => {
-                writer.close()
-            })
-          })
+        const stream = new PassThrough()
+        this.on('stream-data', message => {
+            stream.write(message.data)
+        })
+        this.on('stream-end', () => {
+            stream.end()
+        })
+        return stream
     }
 
     getBuffer(cb) {
