@@ -27,7 +27,7 @@ function WebTorrentRemoteClient (send, opts) {
 
   this._send = send
 
-  this.clientKey = generateUniqueKey()
+  this.clientKey = opts.clientKey || generateUniqueKey()
   this.torrents = {}
 
   this._destroyed = false

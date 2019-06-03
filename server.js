@@ -12,7 +12,7 @@ var WebTorrent = require('webtorrent')
  * - send is a function (message) { ... }
  *   Must deliver them message to the WebTorrentRemoteClient
  *   If there is more than one client, you must check message.clientKey
- * - opts is passed to the WebTorrent varructor
+ * - opts is passed to the WebTorrent constructor
  */
 function WebTorrentRemoteServer (send, opts) {
   this._send = send
@@ -21,6 +21,8 @@ function WebTorrentRemoteServer (send, opts) {
   this._torrents = []
 
   this._webtorrentOpts = opts
+
+  this._canSendStream = opts.canSendStream ? true : false
 
   this._heartbeatTimeout = opts.heartbeatTimeout != null
     ? opts.heartbeatTimeout
@@ -59,8 +61,8 @@ WebTorrentRemoteServer.prototype.receive = function (message) {
       return handleDestroy(this, message)
     case 'file-stream':
       return handleFileCreateReadStream(this, message)
-      case 'add-webseed':
-        return handleAddWebseed(this, message)
+    case 'add-webseed':
+      return handleAddWebseed(this, message)
     default:
       console.error('ignoring unknown message type: ', message)
   }
@@ -237,6 +239,20 @@ function handleFileCreateReadStream (server, message) {
   if (!file.readStreams) file.readStreams = {}
   var stream = file.readStreams[streamKey] = file.createReadStream(opts)
   debug('Handled file create read stream', file, stream)
+
+  // send the raw stream directly if client supports it
+  if (server._canSendStream) {
+    return send(server, {
+      clientKey: clientKey,
+      torrentKey: torrentKey,
+      fileKey,
+      type: 'file-stream-stream',
+      streamKey,
+      stream
+    })
+  }
+
+  // send the stream data as messages
   stream.on('data', data => {
     debug('stream data', data)
     send(server, {
