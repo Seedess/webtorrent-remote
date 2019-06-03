@@ -1,5 +1,5 @@
 const { EventEmitter } = require('events')
-const { PassThrough, Writable } = require('stream')
+const { PassThrough } = require('stream')
 const debug = console.log.bind(console, 'webtorrent-remote:file ')
 
 class File extends EventEmitter {
@@ -72,6 +72,9 @@ class File extends EventEmitter {
         })
         this.on('stream-end', () => {
             stream.end()
+        })
+        this.on('stream', message => {
+            message.stream.pipeThrough(stream)
         })
         return stream
     }

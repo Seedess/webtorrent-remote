@@ -84,6 +84,20 @@ WebTorrentRemoteClient.prototype.receive = function (message) {
   }
 }
 
+/**
+ * Receives a stream from the WebTorrentRemoteServer
+ */
+WebTorrentRemoteClient.prototype.receiveStream = function (message) {
+  if (message.clientKey !== this.clientKey) {
+    return console.error('ignoring message, expected clientKey ' + this.clientKey +
+      ': ' + JSON.stringify(message))
+  }
+  if (this._destroyed) {
+    return console.error('ignoring message, client is destroyed: ' + this.clientKey)
+  }
+  return handleFileStream(this, message)
+}
+
 // Gets an existing torrent. Returns a torrent handle.
 // Emits either the `torrent-present` or `torrent-absent` event on that handle.
 WebTorrentRemoteClient.prototype.get = function (torrentId, cb) {
@@ -277,6 +291,14 @@ function handleSubscribed (client, message) {
     delete client.torrents[message.torrentKey]
     cb(err)
   }
+}
+
+function handleFileStream (client, message) {
+  var torrent = getTorrentByKey(client, message.torrentKey)
+  var file = getFileByKey(torrent, message.fileKey)
+  if (!file) throw new Error('File not found')
+
+  file.emit('stream', message)
 }
 
 function handleFileStreamData (client, message) {
